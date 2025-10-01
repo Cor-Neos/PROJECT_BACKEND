@@ -1,6 +1,7 @@
 // ----------------  SERVICES or QUERIES for the Cases of the BOS Law Firm ... ---------------- //
 
 import { query } from "../db.js";
+import cache from "../utils/cache.js";
 
 // Fetching All Cases from the case_tbl
 export const getCases = async () => {
@@ -14,8 +15,15 @@ export const getCases = async () => {
     LEFT JOIN branch_tbl b ON u.branch_id = b.branch_id
     ORDER BY c.case_date_created DESC;
   `;
-  const { rows } = await query(queryStr);
-  return rows;
+  return cache.wrap(
+    "cases",
+    "all",
+    async () => {
+      const { rows } = await query(queryStr);
+      return rows;
+    },
+    60 * 1000
+  );
 };
 
 // Fetching a Single Case by ID
@@ -30,8 +38,15 @@ export const getCaseById = async (caseId) => {
     WHERE c.case_id = $1
     ORDER BY c.case_date_created DESC;
   `;
-  const { rows } = await query(queryStr, [caseId]);
-  return rows[0];
+  return cache.wrap(
+    "case",
+    String(caseId),
+    async () => {
+      const { rows } = await query(queryStr, [caseId]);
+      return rows[0];
+    },
+    5 * 60 * 1000
+  );
 };
 
 // Fetching Cases by User ID (A Certain Lawyer's Cases)
@@ -47,16 +62,30 @@ export const getCasesByUserId = async (userId) => {
     WHERE c.user_id = $1 OR c.user_id IS NULL
     ORDER BY c.case_date_created DESC;
   `;
-  const { rows } = await query(queryStr, [userId]);
-  return rows;
+  return cache.wrap(
+    "cases_by_user",
+    String(userId),
+    async () => {
+      const { rows } = await query(queryStr, [userId]);
+      return rows;
+    },
+    60 * 1000
+  );
 };
 
 // counting all processing cases
 export const countProcessingCases = async () => {
-  const { rows } = await query(
-    `SELECT COUNT(*) FROM case_tbl WHERE case_status = 'Processing'`
+  return cache.wrap(
+    "cases_count",
+    "processing",
+    async () => {
+      const { rows } = await query(
+        `SELECT COUNT(*) FROM case_tbl WHERE case_status = 'Processing'`
+      );
+      return rows[0].count;
+    },
+    30 * 1000
   );
-  return rows[0].count;
 };
 
 // Creating a New Case
@@ -94,6 +123,10 @@ export const createCase = async (caseData) => {
     assigned_by,
   ]);
 
+  // Invalidate caches related to cases
+  cache.del("cases", "all");
+  cache.delByPrefix("cases_by_user:");
+  cache.del("cases_count", "processing");
   return rows[0];
 };
 
@@ -137,6 +170,11 @@ export const updateCase = async (caseId, caseData) => {
     caseId,
   ]);
 
+  // Invalidate caches for this case and aggregates
+  cache.del("case", String(caseId));
+  cache.del("cases", "all");
+  cache.delByPrefix("cases_by_user:");
+  cache.del("cases_count", "processing");
   return rows[0]; 
 };
 
@@ -154,6 +192,11 @@ export const deleteCase = async (caseId) => {
     throw new Error("Case not found");
   }
 
+  // Invalidate caches
+  cache.del("case", String(caseId));
+  cache.del("cases", "all");
+  cache.delByPrefix("cases_by_user:");
+  cache.del("cases_count", "processing");
   return rows[0];
 };
 
@@ -171,8 +214,16 @@ export const searchCases = async (searchTerm) => {
       OR u.user_mname ILIKE $1 OR u.user_lname ILIKE $1
     ORDER BY c.case_id;
   `;
-  const { rows } = await query(queryStr, [`%${searchTerm}%`]);
-  return rows;
+  const key = (searchTerm || "").trim().toLowerCase();
+  return cache.wrap(
+    "case_search",
+    key,
+    async () => {
+      const { rows } = await query(queryStr, [`%${searchTerm}%`]);
+      return rows;
+    },
+    30 * 1000
+  );
 };
 
 // Case Categories and Types Services
@@ -181,16 +232,30 @@ export const getCaseCategories = async () => {
   const queryStr = `
     SELECT * FROM case_category_tbl ORDER BY cc_id;
   `;
-  const { rows } = await query(queryStr);
-  return rows;
+  return cache.wrap(
+    "case_categories",
+    "all",
+    async () => {
+      const { rows } = await query(queryStr);
+      return rows;
+    },
+    24 * 60 * 60 * 1000 // 1 day
+  );
 };
 
 export const getCaseCategoryTypes = async () => {
   const queryStr = `
     SELECT * FROM cc_type_tbl ORDER BY ct_id;
   `;
-  const { rows } = await query(queryStr);
-  return rows;
+  return cache.wrap(
+    "case_category_types",
+    "all",
+    async () => {
+      const { rows } = await query(queryStr);
+      return rows;
+    },
+    24 * 60 * 60 * 1000
+  );
 };
 
 // other services
@@ -199,46 +264,88 @@ export const getAdmins = async () => {
   const queryStr = `
     SELECT * FROM user_tbl WHERE user_role = 'Admin' ORDER BY user_id;
   `;
-  const { rows } = await query(queryStr);
-  return rows;
+  return cache.wrap(
+    "admins",
+    "all",
+    async () => {
+      const { rows } = await query(queryStr);
+      return rows;
+    },
+    5 * 60 * 1000
+  );
 };
 
 export const getUserById = async (userId) => {
   const queryStr = `
     SELECT * FROM user_tbl WHERE user_id = $1;
   `;
-  const { rows } = await query(queryStr, [userId]);
-  return rows[0];
+  return cache.wrap(
+    "user",
+    String(userId),
+    async () => {
+      const { rows } = await query(queryStr, [userId]);
+      return rows[0];
+    },
+    10 * 60 * 1000
+  );
 };
 
 export const getClientEmailById = async (clientId) => {
   const queryStr = `
     SELECT client_email FROM client_tbl WHERE client_id = $1;
   `;
-  const { rows } = await query(queryStr, [clientId]);
-  return rows[0] ? rows[0].client_email : null;
+  return cache.wrap(
+    "client_email",
+    String(clientId),
+    async () => {
+      const { rows } = await query(queryStr, [clientId]);
+      return rows[0] ? rows[0].client_email : null;
+    },
+    10 * 60 * 1000
+  );
 };
 
 export const getClientNameById = async (clientId) => {
   const queryStr = `
     SELECT client_fullname FROM client_tbl WHERE client_id = $1;
   `;
-  const { rows } = await query(queryStr, [clientId]);
-  return rows[0] ? rows[0].client_fullname : null;
+  return cache.wrap(
+    "client_name",
+    String(clientId),
+    async () => {
+      const { rows } = await query(queryStr, [clientId]);
+      return rows[0] ? rows[0].client_fullname : null;
+    },
+    10 * 60 * 1000
+  );
 };
 
 export const getCaseCategoryNameById = async (ccId) => {
   const queryStr = `
     SELECT cc_name FROM case_category_tbl WHERE cc_id = $1;
   `;
-  const { rows } = await query(queryStr, [ccId]);
-  return rows[0] ? rows[0].cc_name : null;
+  return cache.wrap(
+    "case_category_name",
+    String(ccId),
+    async () => {
+      const { rows } = await query(queryStr, [ccId]);
+      return rows[0] ? rows[0].cc_name : null;
+    },
+    24 * 60 * 60 * 1000
+  );
 };
 
 export const getCaseTypeNameById = async (ctId) => {
   const queryStr = `
     SELECT ct_name FROM cc_type_tbl WHERE ct_id = $1;
   `;
-  const { rows } = await query(queryStr, [ctId]);
-  return rows[0] ? rows[0].ct_name : null;
+  return cache.wrap(
+    "case_type_name",
+    String(ctId),
+    async () => {
+      const { rows } = await query(queryStr, [ctId]);
+      return rows[0] ? rows[0].ct_name : null;
+    },
+    24 * 60 * 60 * 1000
+  );
 };

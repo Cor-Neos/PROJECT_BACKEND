@@ -1,33 +1,56 @@
 // ------------------- SERVICES or QUERIES FOR DOCUMENTS
 
 import { query } from "../db.js";
+import cache from "../utils/cache.js";
 
 import bcrypt from "bcrypt";
 const saltRounds = 10;
 
 // Get all documents
 export const getDocuments = async () => {
-  const { rows } = await query(
-    "SELECT * FROM document_tbl ORDER BY doc_id DeSC"
+  return cache.wrap(
+    "documents",
+    "all",
+    async () => {
+      const { rows } = await query(
+        "SELECT * FROM document_tbl ORDER BY doc_id DeSC"
+      );
+      return rows;
+    },
+    60 * 1000
   );
-  return rows;
 };
 
 // Get a single document by ID
 export const getDocumentById = async (docId) => {
-  const { rows } = await query("SELECT * FROM document_tbl WHERE doc_id = $1", [
-    docId,
-  ]);
-  return rows[0];
+  return cache.wrap(
+    "document",
+    String(docId),
+    async () => {
+      const { rows } = await query(
+        "SELECT * FROM document_tbl WHERE doc_id = $1",
+        [docId]
+      );
+      return rows[0];
+    },
+    5 * 60 * 1000
+  );
 };
 
 // Get documents by Case ID
 export const getDocumentsByCaseId = async (caseId) => {
-  const { rows } = await query(
-    "SELECT * FROM document_tbl WHERE case_id = $1 ORDER BY doc_id ASC",
-    [caseId]
+  return cache.wrap(
+    "documents_by_case",
+    String(caseId),
+    async () => {
+      const { rows } = await query(
+        "SELECT * FROM document_tbl WHERE case_id = $1 ORDER BY doc_id ASC",
+        [caseId]
+      );
+      return rows;
+    },
+    60 * 1000
   );
-  return rows;
 };
 
 // Create a new document
@@ -89,6 +112,9 @@ export const createDocument = async (docData) => {
   ];
 
   const { rows } = await query(queryStr, params);
+  // Invalidate documents caches
+  cache.del("documents", "all");
+  if (case_id) cache.del("documents_by_case", String(case_id));
   return rows[0];
 };
 
@@ -98,17 +124,28 @@ export const deleteDocument = async (docId) => {
     "DELETE FROM document_tbl WHERE doc_id = $1 RETURNING *",
     [docId]
   );
+  cache.del("documents", "all");
+  if (rows[0]?.case_id) cache.del("documents_by_case", String(rows[0].case_id));
+  cache.del("document", String(docId));
   return rows[0];
 };
 
 // Simple search by name / tag / status
 export const searchDocuments = async (term) => {
   const like = `%${term}%`;
-  const { rows } = await query(
-    `SELECT * FROM document_tbl
+  const key = (term || "").trim().toLowerCase();
+  return cache.wrap(
+    "document_search",
+    key,
+    async () => {
+      const { rows } = await query(
+        `SELECT * FROM document_tbl
      WHERE doc_name ILIKE $1 OR COALESCE(doc_tag,'') ILIKE $1 OR COALESCE(doc_status,'') ILIKE $1
      ORDER BY doc_id DESC`,
-    [like]
+        [like]
+      );
+      return rows;
+    },
+    30 * 1000
   );
-  return rows;
 };

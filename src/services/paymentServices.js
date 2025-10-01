@@ -1,11 +1,16 @@
 // ----------------  SERVICES or QUERIES for Payments  ----------------
 
 import { query } from "../db.js";
+import cache from "../utils/cache.js";
 
 // Fetching All Payments
 export const getPayments = async () => {
-  const { rows } = await query(
-    `SELECT *
+  return cache.wrap(
+    "payments",
+    "all",
+    async () => {
+      const { rows } = await query(
+        `SELECT *
         FROM payment_tbl p
         LEFT JOIN case_tbl c ON p.case_id = c.case_id
         LEFT JOIN user_tbl u ON p.user_id = u.user_id
@@ -13,14 +18,21 @@ export const getPayments = async () => {
         LEFT JOIN case_category_tbl cc ON c.cc_id = cc.cc_id
         LEFT JOIN cc_type_tbl ct ON c.ct_id = ct.ct_id
         ORDER BY p.payment_date DESC`
+      );
+      return rows;
+    },
+    30 * 1000
   );
-  return rows;
 };
 
 // Fetching Payments of a specific Case by case_id
 export const getPaymentsByCaseId = async (case_id) => {
-  const { rows } = await query(
-    `SELECT *
+  return cache.wrap(
+    "payments_by_case",
+    String(case_id),
+    async () => {
+      const { rows } = await query(
+        `SELECT *
         FROM payment_tbl p
         LEFT JOIN case_tbl c ON p.case_id = c.case_id
         LEFT JOIN user_tbl u ON p.user_id = u.user_id
@@ -29,15 +41,22 @@ export const getPaymentsByCaseId = async (case_id) => {
         LEFT JOIN cc_type_tbl ct ON c.ct_id = ct.ct_id
         WHERE p.case_id = $1
         ORDER BY p.payment_date DESC`,
-    [case_id]
+        [case_id]
+      );
+      return rows;
+    },
+    30 * 1000
   );
-  return rows;
 };
 
 // Fetching Payments of a specific Lawyer by lawyer_id
 export const getPaymentsByLawyerId = async (lawyer_id) => {
-  const { rows } = await query(
-    `SELECT *
+  return cache.wrap(
+    "payments_by_lawyer",
+    String(lawyer_id),
+    async () => {
+      const { rows } = await query(
+        `SELECT *
         FROM payment_tbl p
         LEFT JOIN case_tbl c ON p.case_id = c.case_id
         LEFT JOIN user_tbl u ON p.user_id = u.user_id
@@ -46,9 +65,12 @@ export const getPaymentsByLawyerId = async (lawyer_id) => {
         LEFT JOIN cc_type_tbl ct ON c.ct_id = ct.ct_id
         WHERE c.user_id = $1
         ORDER BY p.payment_date DESC`,
-    [lawyer_id]
+        [lawyer_id]
+      );
+      return rows;
+    },
+    30 * 1000
   );
-  return rows;
 };
 
 // Adding a New Payment
@@ -59,6 +81,10 @@ export const addPayment = async (paymentData) => {
         VALUES ($1, $2, $3, $4) RETURNING *`,
     [case_id, user_id, payment_amount, payment_type]
   );
+  // Invalidate caches related to payments
+  cache.del("payments", "all");
+  if (case_id) cache.del("payments_by_case", String(case_id));
+  if (user_id) cache.del("payments_by_lawyer", String(user_id));
   return rows[0];
 };
 
@@ -68,5 +94,9 @@ export const deletePayment = async (payment_id) => {
     `DELETE FROM payment_tbl WHERE payment_id = $1 RETURNING *`,
     [payment_id]
   );
+  // Invalidate caches - broad as we don't have case_id/user_id; clear prefixes
+  cache.del("payments", "all");
+  cache.delByPrefix("payments_by_case:");
+  cache.delByPrefix("payments_by_lawyer:");
   return rows[0];
 };

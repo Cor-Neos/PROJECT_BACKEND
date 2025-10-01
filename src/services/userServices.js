@@ -1,20 +1,35 @@
 // ----------------  SERVICES or QUERIES
 
 import { query } from "../db.js";
+import cache from "../utils/cache.js";
 
 import bcrypt from "bcrypt";
 const saltRounds = 10;
 
 // Fetching All Users
 export const getUsers = async () => {
-  const { rows } = await query("SELECT * FROM user_tbl ORDER BY user_id");
-  return rows;
+  return cache.wrap(
+    "users",
+    "all",
+    async () => {
+      const { rows } = await query("SELECT * FROM user_tbl ORDER BY user_id");
+      return rows;
+    },
+    60 * 1000
+  );
 };
 
 // for dashboard user count
 export const countUsers = async () => {
-  const { rows } = await query("SELECT COUNT(*) FROM user_tbl");
-  return rows[0].count;
+  return cache.wrap(
+    "users_count",
+    "all",
+    async () => {
+      const { rows } = await query("SELECT COUNT(*) FROM user_tbl");
+      return rows[0].count;
+    },
+    60 * 1000
+  );
 };
 
 // Adding a New User
@@ -59,6 +74,9 @@ export const createUser = async (userData) => {
     ]
   );
 
+  // Invalidate caches
+  cache.del("users", "all");
+  cache.del("users_count", "all");
   return rows[0];
 };
 
@@ -125,6 +143,10 @@ export const updateUser = async (userId, userData) => {
     ]
   );
 
+  // Invalidate caches for user lists and this user lookup
+  cache.del("users", "all");
+  cache.del("users_count", "all");
+  cache.del("user", String(userId));
   return rows[0];
 };
 
@@ -135,13 +157,22 @@ export const deleteUser = async (userId) => {
     [userId]
   );
 
+  // Invalidate caches
+  cache.del("users", "all");
+  cache.del("users_count", "all");
+  cache.del("user", String(userId));
   return rows[0];
 };
 
 // Searching for a User
 export const searchUsers = async (searchTerm) => {
-  const { rows } = await query(
-    `SELECT * FROM user_tbl
+  const key = (searchTerm || "").trim().toLowerCase();
+  return cache.wrap(
+    "user_search",
+    key,
+    async () => {
+      const { rows } = await query(
+        `SELECT * FROM user_tbl
      WHERE user_fname ILIKE $1
         OR user_mname ILIKE $1
         OR user_lname ILIKE $1
@@ -149,36 +180,56 @@ export const searchUsers = async (searchTerm) => {
         OR user_phonenum ILIKE $1
         OR user_role ILIKE $1
         OR user_status ILIKE $1`,
-    [`%${searchTerm}%`]
+        [`%${searchTerm}%`]
+      );
+      return rows;
+    },
+    30 * 1000
   );
-
-  return rows;
 };
 
 // --------- SERVICES or QUERIES FOR USER LOGS
 
 // Fetching User Logs for Admin
 export const getUserLogs = async () => {
-  const { rows } = await query(
-    `SELECT * FROM user_log_tbl ORDER BY user_log_time DESC`
+  return cache.wrap(
+    "user_logs",
+    "all",
+    async () => {
+      const { rows } = await query(
+        `SELECT * FROM user_log_tbl ORDER BY user_log_time DESC`
+      );
+      return rows;
+    },
+    30 * 1000
   );
-  return rows;
 };
 
 // Fetching User Logs for a Specific User
 export const getUserLogsById = async (userId) => {
-  const { rows } = await query(
-    `SELECT * FROM user_log_tbl WHERE user_id = $1 ORDER BY user_log_time DESC`,
-    [userId]
+  return cache.wrap(
+    "user_logs_by_id",
+    String(userId),
+    async () => {
+      const { rows } = await query(
+        `SELECT * FROM user_log_tbl WHERE user_id = $1 ORDER BY user_log_time DESC`,
+        [userId]
+      );
+      return rows;
+    },
+    30 * 1000
   );
-  return rows;
 };
 
 // ---------- SERVICES or QUERIES FOR LAWYERS' CASE SPECIALTIES
 
 export const getLawyersByCaseCategoryTypes = async () => {
-  const { rows } = await query(
-    `SELECT DISTINCT
+  return cache.wrap(
+    "lawyers_by_case_category_types",
+    "all",
+    async () => {
+      const { rows } = await query(
+        `SELECT DISTINCT
 	      cc.cc_id,
 	      cc.cc_name,
         u.user_id,
@@ -190,6 +241,9 @@ export const getLawyersByCaseCategoryTypes = async () => {
       JOIN user_tbl u ON c.user_id = u.user_id
       ORDER BY cc.cc_id, u.user_fname;
     `
+      );
+      return rows;
+    },
+    10 * 60 * 1000
   );
-  return rows;
 };
