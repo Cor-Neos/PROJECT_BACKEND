@@ -42,11 +42,10 @@ export const createClient = async (clientData) => {
     client_status = "Active",
   } = clientData;
 
-  // Hashing here
-  const hashedPassword = await bcrypt.hash(
-    client_password.toString(),
-    saltRounds
-  );
+  // Hash password only if provided (optional field)
+  const hashedPassword = client_password && String(client_password).trim() !== ""
+    ? await bcrypt.hash(String(client_password), saltRounds)
+    : null;
 
   const { rows } = await query(
     "INSERT INTO client_tbl (client_fullname, client_address, client_email, client_phonenum, created_by, client_password, client_status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
