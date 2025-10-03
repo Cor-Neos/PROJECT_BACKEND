@@ -10,6 +10,7 @@ import caseRoutes from "./routes/caseRoute.js";
 import paymentRoutes from "./routes/paymentRoute.js";
 import documentRoutes from "./routes/documentRoute.js";
 import notificationRoutes from "./routes/notificationRoute.js";
+import * as documentController from "./controllers/documentController.js";
 
 import requireAdminOrLawyer from "./middleware/requireAdminOrLawyer.js";
 import verifyUser from "./middleware/verifyUser.js";
@@ -68,3 +69,10 @@ app.get("/api/ip", (req, res) => {
 
   res.json({ ip });
 });
+
+// Intercept document file downloads to enforce password access
+app.get(
+  "/uploads/:subdir/:filename",
+  verifyUser,
+  documentController.downloadDocumentByFilename
+);

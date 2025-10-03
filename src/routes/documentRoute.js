@@ -66,4 +66,23 @@ router.post(
   documentController.createDocument
 );
 
+// Verify password for a document and get access token
+router.post(
+  "/documents/:id/verify-password",
+  verifyUser,
+  documentController.verifyDocumentPassword
+);
+
+// Secure download endpoints (require auth; token if not owner/admin)
+router.get(
+  "/documents/:id/download",
+  verifyUser,
+  documentController.downloadDocumentById
+);
+router.get(
+  "/documents/download/:subdir/:filename",
+  verifyUser,
+  documentController.downloadDocumentByFilename
+);
+
 export default router;

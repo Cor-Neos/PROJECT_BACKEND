@@ -112,3 +112,12 @@ export const searchDocuments = async (term) => {
   );
   return rows;
 };
+
+// Find by stored file path (e.g., /uploads/supportingDocs/filename.pdf)
+export const getDocumentByFilePath = async (doc_file) => {
+  const { rows } = await query(
+    `SELECT * FROM document_tbl WHERE doc_file = $1 LIMIT 1`,
+    [doc_file]
+  );
+  return rows[0];
+};
