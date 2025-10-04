@@ -38,7 +38,7 @@ export const createClient = async (clientData) => {
     client_email,
     client_phonenum,
     created_by,
-    client_password,
+    client_password = null,
     client_status = "Active",
   } = clientData;
 
