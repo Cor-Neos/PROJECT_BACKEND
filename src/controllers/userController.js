@@ -72,7 +72,7 @@ export const deleteUser = async (req, res) => {
     const user = await userService.getUserById(userId);
     if (user?.user_profile) {
       const filePath = path.join(
-        "D:/Capstone_ni_Angelie/uploads/",
+        "C:/Users/Noel Batoctoy/caps/uploads/",
         user.user_profile
       );
       fs.unlink(filePath, (err) => {
