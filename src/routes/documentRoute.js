@@ -52,12 +52,18 @@ const uploadFields = upload.fields([
 ]);
 
 router.get("/documents", documentController.getDocuments);
+router.get("/documents/lawyer/:lawyerId", verifyUser, documentController.getDocumentsByLawyer);
 router.get("/documents/:id", verifyUser, documentController.getDocumentById);
 router.get(
   "/case/documents/:caseId",
   verifyUser,
   documentController.getDocumentsByCaseId
 );
+router.get(
+  "/documents/submitter/:userId",
+  verifyUser,
+  documentController.getDocumentsBySubmitter
+);  
 router.get(
   "/documents/task/user/:userId",
   verifyUser,

@@ -8,7 +8,19 @@ const saltRounds = 10;
 // Get all documents
 export const getDocuments = async () => {
   const { rows } = await query(
-    "SELECT * FROM document_tbl ORDER BY doc_id DeSC"
+    "SELECT * FROM document_tbl ORDER BY doc_id DESC"
+  );
+  return rows;
+};
+
+// Get all documents of lawyer's cases
+export const getDocumentsByLawyer = async (lawyerId) => {
+  const { rows } = await query(
+    `SELECT d.* FROM document_tbl d
+     JOIN case_tbl c ON d.case_id = c.case_id
+      WHERE c.user_id = $1
+      ORDER BY d.doc_id DESC`,
+    [lawyerId]
   );
   return rows;
 };
@@ -30,10 +42,19 @@ export const getDocumentsByCaseId = async (caseId) => {
   return rows;
 };
 
+// Get documents submitted by a specific user
+export const getDocumentsBySubmitter = async (userId) => {
+  const { rows } = await query(
+    "SELECT * FROM document_tbl WHERE doc_submitted_by = $1 ORDER BY doc_id DESC",
+    [userId]
+  );
+  return rows;
+};
+
 // Get all task documents assigned to a specific user
 export const getTaskDocumentsByUser = async (userId) => {
   const { rows } = await query(
-    "SELECT * FROM document_tbl WHERE doc_type = 'Task' AND (doc_tasked_to = $1 OR doc_tasked_by = $1) ORDER BY doc_id ASC",
+    "SELECT * FROM document_tbl WHERE doc_type = 'Task' AND (doc_tasked_to = $1 OR doc_tasked_by = $1) ORDER BY doc_id DESC",
     [userId]
   );
   return rows;
@@ -118,6 +139,7 @@ export const updateDocument = async (docId, docData) => {
     doc_tasked_by,
     doc_submitted_by,
     doc_reference,
+    doc_last_updated_by,
     case_id,
   } = docData;
 
@@ -140,8 +162,9 @@ export const updateDocument = async (docId, docData) => {
       doc_tasked_by = COALESCE($12, doc_tasked_by),
       doc_submitted_by = COALESCE($13, doc_submitted_by),
       doc_reference = COALESCE($14, doc_reference),
-      case_id = COALESCE($15, case_id)
-    WHERE doc_id = $16
+      doc_last_updated_by = COALESCE($15, doc_last_updated_by),
+      case_id = COALESCE($16, case_id)
+    WHERE doc_id = $17
     RETURNING *;
   `;
 
@@ -160,10 +183,11 @@ export const updateDocument = async (docId, docData) => {
     doc_tasked_by,
     doc_submitted_by,
     doc_reference,
+    doc_last_updated_by,
     case_id,
     docId,
   ];
-  
+
   const { rows } = await query(queryStr, params);
   return rows[0];
 };
@@ -213,5 +237,4 @@ export const countPendingTaskDocuments = async () => {
     `SELECT COUNT(*) FROM document_tbl WHERE doc_type = 'Task' AND doc_status = 'todo'`
   );
   return rows[0].count;
-}
-
+};
