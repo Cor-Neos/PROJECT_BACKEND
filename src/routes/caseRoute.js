@@ -30,7 +30,7 @@ router.get(
   "/cases/count/archived/user/:user_id",
   verifyUser,
   caseController.countArchivedCasesByUserId
-); // Count archived cases of a specific lawyer
+); // Count archived cases of a specific lawyer or viewer
 
 router.post("/cases", caseController.createCase);
 router.put("/cases/:case_id", caseController.updateCase);
@@ -43,5 +43,8 @@ router.get("/case-categories", caseController.getCaseCategories);
 router.get("/case-category-types", caseController.getCaseCategoryTypes);
 router.post("/case-categories", verifyUser, caseController.createCaseCategory);
 router.post("/case-category-types", verifyUser, caseController.createCaseType);
+
+// share access (allowed viewers for a certain case)
+router.put("/cases/:case_id/share", verifyUser, requireAdminOrLawyer, caseController.shareCaseAccess);
 
 export default router;
