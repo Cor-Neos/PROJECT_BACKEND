@@ -47,7 +47,7 @@ export const updateUser = async (req, res) => {
 
     const userData = { ...req.body };
     if (req.file) {
-      userData.user_profile = `/uploads/${req.file.filename}`;
+      userData.user_profile = `/uploads/profile_pictures/${req.file.filename}`;
     }
 
     const updatedUser = await userService.updateUser(userId, userData);
