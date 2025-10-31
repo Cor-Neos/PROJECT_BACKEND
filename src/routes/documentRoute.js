@@ -15,12 +15,12 @@ const storage = multer.diskStorage({
     const docType = req.body.doc_type;
     let uploadPath = "C:/Users/Noel Batoctoy/caps/uploads";
 
-    if (docType === "Task") {
-      uploadPath += "/taskedDocs";
+    if (file.fieldname === "doc_reference") {
+      uploadPath += "/referenceDocs";
     } else if (docType === "Support") {
       uploadPath += "/supportingDocs";
-    } else if (file.fieldname === "doc_reference") {
-      uploadPath += "/referenceDocs";
+    } else if (docType === "Task") {
+      uploadPath += "/taskedDocs";
     }
 
     cb(null, uploadPath);
@@ -81,7 +81,12 @@ router.post(
   documentController.createDocument
 );
 
-router.put("/documents/:id", verifyUser, documentController.updateDocument);
+router.put("/documents/:id", verifyUser, uploadFields, documentController.updateDocument);
+router.put(
+  "/documents/:id/remove-reference",
+  verifyUser,
+  documentController.removeReference
+); // remove a specific doc_reference file
 
 router.delete("/documents/:id", verifyUser, documentController.deleteDocument);
 
@@ -102,6 +107,11 @@ router.get(
   verifyUser,
   documentController.countProcessingDocuments
 );
+router.get(
+  "/documents/count/processing/lawyer",
+  verifyUser,
+  documentController.countProcessingDocumentsByLawyer
+); // for a specific lawyer
 router.get(
   "/documents/count/pending-tasks",
   verifyUser,

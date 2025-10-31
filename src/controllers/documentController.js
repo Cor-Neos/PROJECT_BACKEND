@@ -77,19 +77,26 @@ export const getTaskDocumentsByUser = async (req, res) => {
 // Creating a New Document
 export const createDocument = async (req, res) => {
   try {
-    const mainFile = req.files["doc_file"] ? req.files["doc_file"][0].filename : null;
-    const references = req.files["doc_reference"] 
-      ? req.files["doc_reference"].map(f => f.filename) 
+    const mainFile = req.files["doc_file"]
+      ? req.files["doc_file"][0].filename
+      : null;
+    const references = req.files["doc_reference"]
+      ? req.files["doc_reference"].map((f) => f.filename)
       : [];
 
     // Save to DB
     const docData = {
       ...req.body,
-      doc_file: mainFile ? `/uploads/${req.body.doc_type === "Tasked" ? "taskedDocs" : "supportingDocs"}/${mainFile}` : null,
-      doc_reference: references.length ? JSON.stringify(references.map(f => `/uploads/referenceDocs/${f}`)) : null
+      doc_file: mainFile
+        ? `/uploads/${
+            req.body.doc_type === "Tasked" ? "taskedDocs" : "supportingDocs"
+          }/${mainFile}`
+        : null,
+      doc_reference: references.length
+        ? JSON.stringify(references.map((f) => `/uploads/referenceDocs/${f}`))
+        : null,
     };
 
-    // Call your service/DB insert
     const newDoc = await documentService.createDocument(docData);
 
     res.status(201).json(newDoc);
@@ -103,25 +110,64 @@ export const createDocument = async (req, res) => {
 export const updateDocument = async (req, res) => {
   const { id } = req.params;
   try {
-    let body = { ...req.body };
+    const body = { ...req.body };
 
-    const mainFile = req.files["doc_file"] ? req.files["doc_file"][0].filename : null;
-    const references = req.files["doc_reference"] 
-      ? req.files["doc_reference"].map(f => f.filename) 
-      : [];
+    const files = req.files || {}; // safely handle undefined
+
+    const mainFile = files["doc_file"]?.[0]?.filename || null;
+    const references = files["doc_reference"]?.map((f) => f.filename) || [];
 
     if (mainFile) {
-      body.doc_file = `/uploads/${req.body.doc_type === "Tasked" ? "taskedDocs" : "supportingDocs"}/${mainFile}`;
+      body.doc_file = `/uploads/${
+        req.body.doc_type === "Task" ? "taskedDocs" : "supportingDocs"
+      }/${mainFile}`;
     }
-    if (references.length) {
-      body.doc_reference = JSON.stringify(references.map(f => `/uploads/referenceDocs/${f}`));
+
+    if (files["doc_reference"] || req.body.doc_reference) {
+      let existing = [];
+
+      const rawRef = req.body.doc_reference;
+
+      if (Array.isArray(rawRef)) {
+        for (const ref of rawRef) {
+          if (typeof ref === "string" && ref.trim().startsWith("[")) {
+            try {
+              const parsed = JSON.parse(ref);
+              if (Array.isArray(parsed)) existing.push(...parsed);
+            } catch (e) {
+              console.warn("Invalid JSON string in doc_reference array:", ref);
+            }
+          } else if (typeof ref === "string" && ref.trim() !== "") {
+            existing.push(ref);
+          }
+        }
+      } else if (typeof rawRef === "string" && rawRef.trim()) {
+        try {
+          const parsed = JSON.parse(rawRef);
+          existing = Array.isArray(parsed) ? parsed : [rawRef];
+        } catch {
+          existing = [rawRef];
+        }
+      }
+
+      // Add new uploaded references
+      const newRefs = (files["doc_reference"] || []).map(
+        (f) => `/uploads/referenceDocs/${f.filename}`
+      );
+
+      // Merge and deduplicate
+      const allRefs = [...new Set([...existing, ...newRefs])];
+
+      // Final JSON string to send to service
+      body.doc_reference = allRefs.length ? JSON.stringify(allRefs) : null;
     }
-    
+
     const updatedDoc = await documentService.updateDocument(id, body);
 
     if (!updatedDoc) {
       return res.status(404).json({ message: "Document not found" });
     }
+
     res.status(200).json(updatedDoc);
   } catch (err) {
     console.error("Error updating document:", err);
@@ -172,24 +218,36 @@ export const countProcessingDocuments = async (req, res) => {
   try {
     const count = await documentService.countProcessingDocuments();
     res.status(200).json({ count });
-  }
-  catch (err) {
+  } catch (err) {
     console.error("Error counting processing documents:", err);
     res.status(500).json({ message: "Internal Server Error" });
   }
-}
+};
+
+// Count processing documents of a specific lawyer
+export const countProcessingDocumentsByLawyer = async (req, res) => {
+  const lawyerId = req.user.user_id;
+  try {
+    const count = await documentService.countProcessingDocumentsByLawyer(
+      lawyerId
+    );
+    res.status(200).json({ count });
+  } catch (err) {
+    console.error("Error counting processing documents for lawyer:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
 
 // count of pending task documents where the doc_status is "todo"
 export const countPendingTaskDocuments = async (req, res) => {
   try {
     const count = await documentService.countPendingTaskDocuments();
     res.status(200).json({ count });
-  }
-  catch (err) {
+  } catch (err) {
     console.error("Error counting pending task documents:", err);
     res.status(500).json({ message: "Internal Server Error" });
   }
-}
+};
 
 // count pending task documents assigned to a paralegal or staff
 export const countUserPendingTaskDocuments = async (req, res) => {
@@ -197,13 +255,34 @@ export const countUserPendingTaskDocuments = async (req, res) => {
   try {
     const count = await documentService.countUserPendingTaskDocuments(userId);
     res.status(200).json({ count });
-  }
-  catch (err) {
+  } catch (err) {
     console.error("Error counting user pending task documents:", err);
     res.status(500).json({ message: "Internal Server Error" });
   }
-}
+};
 
+// remove a document reference from a document
 
+export const removeReference = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { referencePath } = req.body;
 
+    if (!referencePath) {
+      return res.status(400).json({ error: "doc_reference path is required" });
+    }
 
+    const updatedDoc = await documentService.removeReferenceFromDocument(
+      id,
+      referencePath
+    );
+    if (!updatedDoc) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    res.json(updatedDoc);
+  } catch (err) {
+    console.error("Error removing reference:", err);
+    res.status(500).json({ error: "Failed to remove reference" });
+  }
+};
