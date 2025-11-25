@@ -47,7 +47,7 @@ export const updateUser = async (req, res) => {
 
     const userData = { ...req.body };
     if (req.file) {
-      userData.user_profile = `/uploads/${req.file.filename}`;
+      userData.user_profile = `/uploads/profile_pictures/${req.file.filename}`;
     }
 
     const updatedUser = await userService.updateUser(userId, userData);
@@ -141,5 +141,42 @@ export const getLawyersByCaseCategoryTypes = async (req, res) => {
   } catch (err) {
     console.error("Error fetching lawyers by case category types", err);
     res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ================= Role update with conditional permission =================
+export const updateUserRole = async (req, res) => {
+  try {
+    const targetUserId = req.params.user_id;
+    const { user_role } = req.body;
+    if (!user_role)
+      return res.status(400).json({ message: "user_role is required" });
+
+    const requesterRole = req.user?.user_role || "";
+    const desired = user_role || "";
+
+    // Admin can always change roles
+    if (requesterRole !== "Admin") {
+      // Lawyer can only promote to Admin if there is no current Admin
+      if (requesterRole === "Lawyer") {
+        const adminCount = await userService.countAdmins();
+        if (!(desired === "Admin" && adminCount === 0)) {
+          return res.status(403).json({
+            message:
+              "Only when no Admin exists can a Lawyer assign the first Admin.",
+          });
+        }
+      } else {
+        return res.status(403).json({ message: "Insufficient permission." });
+      }
+    }
+
+    const updated = await userService.updateUserRoleOnly(targetUserId, desired);
+    if (!updated) return res.status(404).json({ message: "User not found" });
+
+    res.status(200).json(updated);
+  } catch (err) {
+    console.error("Error updating user role", err);
+    res.status(500).json({ message: "Failed to update user role" });
   }
 };

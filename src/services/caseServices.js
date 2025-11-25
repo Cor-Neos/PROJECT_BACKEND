@@ -44,7 +44,9 @@ export const getCasesByUserId = async (userId) => {
     LEFT JOIN case_category_tbl cc ON c.cc_id = cc.cc_id
     LEFT JOIN cc_type_tbl ct ON c.ct_id = ct.ct_id
     LEFT JOIN branch_tbl b ON u.branch_id = b.branch_id
-    WHERE c.user_id = $1 OR c.user_id IS NULL
+    WHERE c.user_id = $1
+      OR ($1 = ANY(c.case_allowed_viewers))
+      OR c.user_id IS NULL
     ORDER BY c.case_date_created DESC;
   `;
   const { rows } = await query(queryStr, [userId]);
@@ -61,10 +63,10 @@ export const countProcessingCases = async () => {
 
 export const countArchivedCases = async () => {
   const { rows } = await query(
-    `SELECT COUNT(*) FROM case_tbl WHERE case_status = 'Archived'`
+    `SELECT COUNT(*) FROM case_tbl WHERE case_status = 'Archived (Completed)' OR case_status = 'Archived (Dismissed)'`
   );
   return rows[0].count;
-}
+};
 
 // Creating a New Case
 export const createCase = async (caseData) => {
@@ -144,7 +146,7 @@ export const updateCase = async (caseId, caseData) => {
     caseId,
   ]);
 
-  return rows[0]; 
+  return rows[0];
 };
 
 // Deleting a Case
@@ -200,6 +202,51 @@ export const getCaseCategoryTypes = async () => {
   return rows;
 };
 
+// helpers and creators for categories and types
+export const findCaseCategoryByName = async (name) => {
+  const { rows } = await query(
+    `SELECT * FROM case_category_tbl WHERE LOWER(cc_name) = LOWER($1) LIMIT 1;`,
+    [name]
+  );
+  return rows[0] || null;
+};
+
+export const findCaseTypeByName = async (name) => {
+  const { rows } = await query(
+    `SELECT * FROM cc_type_tbl WHERE LOWER(ct_name) = LOWER($1) LIMIT 1;`,
+    [name]
+  );
+  return rows[0] || null;
+};
+
+export const createCaseCategory = async (cc_name) => {
+  const existing = await findCaseCategoryByName(cc_name);
+  if (existing) {
+    const err = new Error("Category already exists");
+    err.code = "ALREADY_EXISTS";
+    throw err;
+  }
+  const { rows } = await query(
+    `INSERT INTO case_category_tbl (cc_name) VALUES ($1) RETURNING *;`,
+    [cc_name]
+  );
+  return rows[0];
+};
+
+export const createCaseType = async (ct_name, cc_id = null) => {
+  const existing = await findCaseTypeByName(ct_name);
+  if (existing) {
+    const err = new Error("Type already exists");
+    err.code = "ALREADY_EXISTS";
+    throw err;
+  }
+  const { rows } = await query(
+    `INSERT INTO cc_type_tbl (ct_name, cc_id) VALUES ($1, $2) RETURNING *;`,
+    [ct_name, cc_id]
+  );
+  return rows[0];
+};
+
 // other services
 
 export const getAdmins = async () => {
@@ -248,4 +295,32 @@ export const getCaseTypeNameById = async (ctId) => {
   `;
   const { rows } = await query(queryStr, [ctId]);
   return rows[0] ? rows[0].ct_name : null;
+};
+
+// case access services
+
+// Updating allowed viewers for a case (share access)
+export const updateCaseAllowedViewers = async (
+  caseId,
+  allowedViewers = [],
+  updatedBy = null
+) => {
+  // Ensure array of integers or null
+  const viewersArray = Array.isArray(allowedViewers)
+    ? allowedViewers.map((v) => Number(v))
+    : [];
+  const queryStr = `
+    UPDATE case_tbl
+    SET case_allowed_viewers = $1::int[],
+        case_last_updated = NOW(),
+        last_updated_by = $3
+    WHERE case_id = $2
+    RETURNING *;
+  `;
+  const { rows } = await query(queryStr, [
+    viewersArray.length ? viewersArray : null,
+    caseId,
+    updatedBy,
+  ]);
+  return rows[0];
 };

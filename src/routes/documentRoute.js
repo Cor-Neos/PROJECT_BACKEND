@@ -15,12 +15,12 @@ const storage = multer.diskStorage({
     const docType = req.body.doc_type;
     let uploadPath = "C:/Users/Noel Batoctoy/caps/uploads";
 
-    if (docType === "Task") {
-      uploadPath += "/taskedDocs";
+    if (file.fieldname === "doc_reference") {
+      uploadPath += "/referenceDocs";
     } else if (docType === "Support") {
       uploadPath += "/supportingDocs";
-    } else if (file.fieldname === "doc_reference") {
-      uploadPath += "/referenceDocs";
+    } else if (docType === "Task") {
+      uploadPath += "/taskedDocs";
     }
 
     cb(null, uploadPath);
@@ -52,11 +52,26 @@ const uploadFields = upload.fields([
 ]);
 
 router.get("/documents", documentController.getDocuments);
+router.get(
+  "/documents/lawyer/:lawyerId",
+  verifyUser,
+  documentController.getDocumentsByLawyer
+);
 router.get("/documents/:id", verifyUser, documentController.getDocumentById);
 router.get(
   "/case/documents/:caseId",
   verifyUser,
   documentController.getDocumentsByCaseId
+);
+router.get(
+  "/documents/submitter/:userId",
+  verifyUser,
+  documentController.getDocumentsBySubmitter
+);
+router.get(
+  "/documents/task/user/:userId",
+  verifyUser,
+  documentController.getTaskDocumentsByUser
 );
 
 router.post(
@@ -64,6 +79,48 @@ router.post(
   verifyUser,
   uploadFields,
   documentController.createDocument
+);
+
+router.put("/documents/:id", verifyUser, uploadFields, documentController.updateDocument);
+router.put(
+  "/documents/:id/remove-reference",
+  verifyUser,
+  documentController.removeReference
+); // remove a specific doc_reference file
+
+router.delete("/documents/:id", verifyUser, documentController.deleteDocument);
+
+router.get(
+  "/documents/search/:query",
+  verifyUser,
+  documentController.searchDocuments
+);
+
+// counts for dashboard
+router.get(
+  "/documents/count/for-approval",
+  verifyUser,
+  documentController.countForApprovalDocuments
+);
+router.get(
+  "/documents/count/processing",
+  verifyUser,
+  documentController.countProcessingDocuments
+);
+router.get(
+  "/documents/count/processing/lawyer",
+  verifyUser,
+  documentController.countProcessingDocumentsByLawyer
+); // for a specific lawyer
+router.get(
+  "/documents/count/pending-tasks",
+  verifyUser,
+  documentController.countPendingTaskDocuments
+);
+router.get(
+  "/documents/count/pending-tasks/:userId",
+  verifyUser,
+  documentController.countUserPendingTaskDocuments
 );
 
 // Verify password for a document and get access token

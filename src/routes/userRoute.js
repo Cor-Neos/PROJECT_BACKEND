@@ -35,7 +35,7 @@ const upload = multer({
 
 // Routes
 router.get("/users", verifyUser, userController.getUsers);
-router.get("/users/count", verifyUser, requireAdmin, userController.countUsers);
+router.get("/users/count", verifyUser, requireAdmin, userController.countUsers); // for dashboard stats
 router.post(
   "/users",
   verifyUser,
@@ -71,6 +71,12 @@ router.get(
   "/lawyer-specializations",
   verifyUser,
   userController.getLawyersByCaseCategoryTypes
+);
+
+router.put(
+  "/users/:user_id/role",
+  verifyUser,
+  userController.updateUserRole
 );
 
 export default router;

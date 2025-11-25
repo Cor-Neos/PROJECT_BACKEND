@@ -8,7 +8,19 @@ const saltRounds = 10;
 // Get all documents
 export const getDocuments = async () => {
   const { rows } = await query(
-    "SELECT * FROM document_tbl ORDER BY doc_id DeSC"
+    "SELECT * FROM document_tbl ORDER BY doc_id DESC"
+  );
+  return rows;
+};
+
+// Get all documents of lawyer's cases
+export const getDocumentsByLawyer = async (lawyerId) => {
+  const { rows } = await query(
+    `SELECT d.* FROM document_tbl d
+     JOIN case_tbl c ON d.case_id = c.case_id
+      WHERE c.user_id = $1
+      ORDER BY d.doc_id DESC`,
+    [lawyerId]
   );
   return rows;
 };
@@ -26,6 +38,24 @@ export const getDocumentsByCaseId = async (caseId) => {
   const { rows } = await query(
     "SELECT * FROM document_tbl WHERE case_id = $1 ORDER BY doc_id ASC",
     [caseId]
+  );
+  return rows;
+};
+
+// Get documents submitted by a specific user
+export const getDocumentsBySubmitter = async (userId) => {
+  const { rows } = await query(
+    "SELECT * FROM document_tbl WHERE doc_submitted_by = $1 ORDER BY doc_id DESC",
+    [userId]
+  );
+  return rows;
+};
+
+// Get all task documents assigned to (staff/paralegal) or tasked by (admin/lawyer) a specific user
+export const getTaskDocumentsByUser = async (userId) => {
+  const { rows } = await query(
+    "SELECT * FROM document_tbl WHERE doc_type = 'Task' AND (doc_tasked_to = $1 OR doc_tasked_by = $1) ORDER BY doc_id DESC",
+    [userId]
   );
   return rows;
 };
@@ -92,6 +122,76 @@ export const createDocument = async (docData) => {
   return rows[0];
 };
 
+// Update a document
+export const updateDocument = async (docId, docData) => {
+  const {
+    doc_name,
+    doc_type,
+    doc_description,
+    doc_task,
+    doc_file,
+    doc_prio_level,
+    doc_due_date,
+    doc_status,
+    doc_tag,
+    doc_password,
+    doc_tasked_to,
+    doc_tasked_by,
+    doc_submitted_by,
+    doc_reference,
+    doc_last_updated_by,
+    case_id,
+  } = docData;
+
+  const hashedPassword = doc_password
+    ? await bcrypt.hash(doc_password.toString(), saltRounds)
+    : null;
+  const queryStr = `
+    UPDATE document_tbl SET
+      doc_name = COALESCE($1, doc_name),
+      doc_type = COALESCE($2, doc_type),
+      doc_description = COALESCE($3, doc_description),
+      doc_task = COALESCE($4, doc_task),
+      doc_file = COALESCE($5, doc_file),
+      doc_prio_level = COALESCE($6, doc_prio_level),
+      doc_due_date = COALESCE($7, doc_due_date),
+      doc_status = COALESCE($8, doc_status),
+      doc_tag = COALESCE($9, doc_tag),
+      doc_password = COALESCE($10, doc_password),
+      doc_tasked_to = COALESCE($11, doc_tasked_to),
+      doc_tasked_by = COALESCE($12, doc_tasked_by),
+      doc_submitted_by = COALESCE($13, doc_submitted_by),
+      doc_reference = COALESCE($14::jsonb, doc_reference),
+      doc_last_updated_by = COALESCE($15, doc_last_updated_by),
+      case_id = COALESCE($16, case_id)
+    WHERE doc_id = $17
+    RETURNING *;
+  `;
+
+  const params = [
+    doc_name,
+    doc_type,
+    doc_description,
+    doc_task,
+    doc_file,
+    doc_prio_level,
+    doc_due_date,
+    doc_status,
+    doc_tag,
+    hashedPassword,
+    doc_tasked_to,
+    doc_tasked_by,
+    doc_submitted_by,
+    doc_reference,
+    doc_last_updated_by,
+    case_id,
+    docId,
+  ];
+
+  const { rows } = await query(queryStr, params);
+  return rows[0];
+};
+
 // Delete a document
 export const deleteDocument = async (docId) => {
   const { rows } = await query(
@@ -111,6 +211,69 @@ export const searchDocuments = async (term) => {
     [like]
   );
   return rows;
+};
+
+// count for approval documents with status "done" for dashboard
+export const countForApprovalDocuments = async () => {
+  const { rows } = await query(
+    `SELECT COUNT(*) FROM document_tbl WHERE doc_status = 'done'`
+  );
+  return rows[0].count;
+};
+
+// count of the processing documents where the status of its case_id is "processing"
+export const countProcessingDocuments = async () => {
+  const { rows } = await query(
+    `SELECT COUNT(*) FROM document_tbl d
+      JOIN case_tbl c ON d.case_id = c.case_id
+      WHERE c.case_status = 'Processing'`
+  );
+  return rows[0].count;
+};
+
+// count processing documents of a lawyer's cases
+export const countProcessingDocumentsByLawyer = async (lawyerId) => {
+  const { rows } = await query(
+    `SELECT COUNT(*) FROM document_tbl d
+      JOIN case_tbl c ON d.case_id = c.case_id
+      WHERE c.case_status = 'Processing' AND c.user_id = $1`,
+    [lawyerId]
+  );
+  return rows[0].count;
+};
+
+// count of pending task documents where the doc_status is "todo"
+export const countPendingTaskDocuments = async () => {
+  const { rows } = await query(
+    `SELECT COUNT(*) FROM document_tbl WHERE doc_type = 'Task' AND doc_status != 'approved'`
+  );
+  return rows[0].count;
+};
+
+// count pending task documents assigned to a paralegal or staff
+export const countUserPendingTaskDocuments = async (userId) => {
+  const { rows } = await query(
+    `SELECT COUNT(*) FROM document_tbl
+      WHERE doc_type = 'Task' AND (doc_tasked_to = $1 OR doc_tasked_by = $1) AND doc_status != 'approved'`,
+    [userId]
+  );
+  return rows[0].count;
+};
+
+// Remove a specific reference path from doc_reference JSONB array
+export const removeReferenceFromDocument = async (docId, referencePath) => {
+  const sql = `
+    UPDATE document_tbl
+    SET doc_reference = COALESCE((
+      SELECT jsonb_agg(value)
+      FROM jsonb_array_elements(doc_reference)
+      WHERE value::text <> to_jsonb($1::text)::text
+    ), '[]'::jsonb)
+    WHERE doc_id = $2
+    RETURNING *;
+  `;
+  const { rows } = await query(sql, [referencePath, docId]);
+  return rows[0];
 };
 
 // Find by stored file path (e.g., /uploads/supportingDocs/filename.pdf)
