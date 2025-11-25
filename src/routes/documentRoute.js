@@ -88,7 +88,7 @@ router.put(
   documentController.removeReference
 ); // remove a specific doc_reference file
 
-router.delete("/documents/:id", verifyUser, documentController.deleteDocument);
+router.delete("/documents/:id", verifyUser, requireAdmin, documentController.deleteDocument);
 
 router.get(
   "/documents/search/:query",
@@ -116,7 +116,7 @@ router.get(
   "/documents/count/pending-tasks",
   verifyUser,
   documentController.countPendingTaskDocuments
-);
+); // for admin dashboard
 router.get(
   "/documents/count/pending-tasks/:userId",
   verifyUser,
