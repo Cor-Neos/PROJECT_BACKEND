@@ -157,26 +157,26 @@ export const updateCase = async (req, res) => {
 
     const updatedCase = await caseServices.updateCase(caseId, caseData);
 
-    // const user = await caseServices.getUserById(updatedCase.user_id);
-    // const updatedBy = await caseServices.getUserById(caseData.last_updated_by); // the one who updated the case
-    // const cc_name = await caseServices.getCaseCategoryNameById(
-    //   updatedCase.cc_id
-    // );
-    // const ct_name = await caseServices.getCaseTypeNameById(updatedCase.ct_id);
-    // const client_name = await caseServices.getClientNameById(
-    //   caseData.client_id
-    // );
-    // const client_email = await caseServices.getClientEmailById(
-    //   caseData.client_id
-    // );
-    // const admins = await caseServices.getAdmins();
+    const user = await caseServices.getUserById(updatedCase.user_id);
+    const updatedBy = await caseServices.getUserById(caseData.last_updated_by); // the one who updated the case
+    const cc_name = await caseServices.getCaseCategoryNameById(
+      updatedCase.cc_id
+    );
+    const ct_name = await caseServices.getCaseTypeNameById(updatedCase.ct_id);
+    const client_name = await caseServices.getClientNameById(
+      caseData.client_id
+    );
+    const client_email = await caseServices.getClientEmailById(
+      caseData.client_id
+    );
+    const admins = await caseServices.getAdmins();
 
-    // let lawyer_text = "No lawyer assigned yet";
-    // if (user) {
-    //   lawyer_text = `Lawyer: ${user.user_fname} ${
-    //     user.user_mname ? user.user_mname : ""
-    //   } ${user.user_lname}`;
-    // }
+    let lawyer_text = "No lawyer assigned yet";
+    if (user) {
+      lawyer_text = `Lawyer: ${user.user_fname} ${
+        user.user_mname ? user.user_mname : ""
+      } ${user.user_lname}`;
+    }
 
     // // notifying all super lawyers or admins
     // admins.forEach((admin) => {
@@ -207,7 +207,7 @@ export const updateCase = async (req, res) => {
     // sendCaseUpdateNotification(
     //   client_email,
     //   "Case Successfully Updated in the BOS' Legal Vault",
-    //   `Hello ${client_name},\n\nYour ${cc_name}: ${ct_name} has been successfully updated in our system. Please contact your lawyer for more details.`
+    //   `Hello ${client_name},\n\nYour ${cc_name}: ${ct_name} has been successfully updated in our system.\n\nTag: ${updatedCase.case_tag}\nRemarks: ${updatedCase.case_remarks} \n\nPlease contact your lawyer for more details.`
     // );
 
     if (!updatedCase) {
@@ -289,15 +289,36 @@ export const createCaseCategory = async (req, res) => {
 
 export const createCaseType = async (req, res) => {
   try {
-    const { ct_name, cc_id } = req.body;
+    const { ct_name, ct_fee, cc_id } = req.body;
+
     if (!ct_name || !ct_name.trim()) {
       return res.status(400).json({ message: "Type name is required" });
     }
+
+    // Expect ct_fee as numbers from frontend
+    if (!ct_fee || typeof ct_fee !== "object" || ct_fee.min == null || ct_fee.max == null) {
+      return res.status(400).json({ message: "Fee range is required" });
+    }
+
+    const minFee = Number(ct_fee.min);
+    const maxFee = Number(ct_fee.max);
+
+    if (isNaN(minFee) || isNaN(maxFee)) {
+      return res.status(400).json({ message: "Fee values must be numbers" });
+    }
+
+    // Format fee string for storage
+    const formattedFee = `₱${minFee.toLocaleString("en-US")} - ₱${maxFee.toLocaleString("en-US")}`;
+
+    // Save to DB as VARCHAR
     const created = await caseServices.createCaseType(
       ct_name.trim(),
+      formattedFee,
       cc_id ?? null
     );
+
     res.status(201).json(created);
+
   } catch (err) {
     if (err.code === "ALREADY_EXISTS") {
       return res.status(409).json({ message: "Type already exists" });

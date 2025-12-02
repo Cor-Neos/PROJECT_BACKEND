@@ -8,7 +8,11 @@ const saltRounds = 10;
 // Get all documents
 export const getDocuments = async () => {
   const { rows } = await query(
-    "SELECT * FROM document_tbl ORDER BY doc_id DESC"
+    `SELECT d.* FROM document_tbl d 
+     JOIN case_tbl c ON d.case_id = c.case_id
+     WHERE c.case_status != 'Archived (Completed)' AND c.case_status != 'Archived (Dismissed)' 
+     AND c.case_status != 'Dismissed' AND c.case_status != 'Completed'
+     ORDER BY doc_id DESC`
   );
   return rows;
 };
@@ -63,6 +67,7 @@ export const getTaskDocumentsByUser = async (userId) => {
         OR d.doc_tasked_by = $1
         OR c.user_id = $1
       )
+      AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)
     ORDER BY d.doc_id DESC;
   `;
 
@@ -150,6 +155,9 @@ export const updateDocument = async (docId, docData) => {
     doc_submitted_by,
     doc_reference,
     doc_last_updated_by,
+    is_trashed,
+    doc_trashed_by,
+    doc_trashed_date,
     case_id,
   } = docData;
 
@@ -173,8 +181,11 @@ export const updateDocument = async (docId, docData) => {
       doc_submitted_by = COALESCE($13, doc_submitted_by),
       doc_reference = COALESCE($14::jsonb, doc_reference),
       doc_last_updated_by = COALESCE($15, doc_last_updated_by),
-      case_id = COALESCE($16, case_id)
-    WHERE doc_id = $17
+      doc_trashed_by = COALESCE($16, doc_trashed_by),
+      doc_trashed_date = COALESCE($17, doc_trashed_date),
+      is_trashed = COALESCE($18, is_trashed),
+      case_id = COALESCE($19, case_id)
+    WHERE doc_id = $20
     RETURNING *;
   `;
 
@@ -194,6 +205,9 @@ export const updateDocument = async (docId, docData) => {
     doc_submitted_by,
     doc_reference,
     doc_last_updated_by,
+    doc_trashed_by,
+    doc_trashed_date,
+    is_trashed,
     case_id,
     docId,
   ];
@@ -255,7 +269,10 @@ export const countProcessingDocumentsByLawyer = async (lawyerId) => {
 // count of pending task documents where the doc_status is not "approved"
 export const countPendingTaskDocuments = async () => {
   const { rows } = await query(
-    `SELECT COUNT(*) FROM document_tbl WHERE doc_type = 'Task' AND doc_status != 'approved'`
+    `SELECT COUNT(*) FROM document_tbl d 
+     JOIN case_tbl c ON d.case_id = c.case_id
+     WHERE doc_type = 'Task' AND doc_status != 'approved'
+     AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)`
   );
   return rows[0].count;
 };
@@ -274,7 +291,7 @@ export const countUserPendingTaskDocuments = async (userId) => {
         OR c.user_id = $1            -- tasks belonging to lawyer's cases
       )
       AND (d.doc_status IS NULL OR LOWER(d.doc_status) NOT IN ('approved', 'completed'))
-      AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Deleted') OR c.case_status IS NULL)
+      AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)
   `;
 
   const { rows } = await query(sql, [userId]);

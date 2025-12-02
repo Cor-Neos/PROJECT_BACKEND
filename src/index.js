@@ -11,6 +11,7 @@ import paymentRoutes from "./routes/paymentRoute.js";
 import documentRoutes from "./routes/documentRoute.js";
 import notificationRoutes from "./routes/notificationRoute.js";
 import reportRoutes from "./routes/reportRoute.js";
+import caseTagRoutes from "./routes/caseTagRoute.js";
 
 import requireAdminOrLawyer from "./middleware/requireAdminOrLawyer.js";
 import verifyUser from "./middleware/verifyUser.js";
@@ -41,15 +42,15 @@ app.use("/api", paymentRoutes);
 app.use("/api", documentRoutes);
 app.use("/api", notificationRoutes);
 app.use("/api", reportRoutes);
+app.use("/api", caseTagRoutes);
 
 // IMPORTANT: mount restricted subpaths BEFORE the generic /uploads static, otherwise
 // the generic static will serve files and bypass the role middleware.
 app.use(
   "/uploads/taskedDocs",
-  verifyUser,
-  requireAdminOrLawyer,
+  verifyUser, // only verified users can access tasked documents
   express.static("C:/Users/Noel Batoctoy/caps/uploads/taskedDocs")
-); // tasked document uploads (restricted)
+);
 app.use(
   "/uploads/supportingDocs",
   verifyUser,
