@@ -269,12 +269,12 @@ export const countProcessingDocumentsByLawyer = async (lawyerId) => {
   return rows[0].count;
 };
 
-// count of pending task documents where the doc_status is not "approved"
+// count of pending task documents where the doc_status is not "approved", "done", or "completed"
 export const countPendingTaskDocuments = async () => {
   const { rows } = await query(
     `SELECT COUNT(*) FROM document_tbl d 
      JOIN case_tbl c ON d.case_id = c.case_id
-     WHERE doc_type = 'Task' AND doc_status != 'approved'
+     WHERE doc_type = 'Task' AND LOWER(doc_status) NOT IN ('approved', 'done', 'completed')
      AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)`
   );
   return rows[0].count;
@@ -293,7 +293,7 @@ export const countUserPendingTaskDocuments = async (userId) => {
         OR d.doc_tasked_by = $1      -- tasks created by the user
         OR c.user_id = $1            -- tasks belonging to lawyer's cases
       )
-      AND (d.doc_status IS NULL OR LOWER(d.doc_status) NOT IN ('approved', 'completed'))
+      AND (d.doc_status IS NULL OR LOWER(d.doc_status) NOT IN ('approved', 'completed', 'done'))
       AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)
   `;
 
