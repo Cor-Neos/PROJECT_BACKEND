@@ -406,10 +406,12 @@ export const encryptDocumentFiles = async (caseId, userId) => {
       try {
         // Encrypt main document file
         if (doc.doc_file) {
-          const filePath = path.join(process.cwd(), doc.doc_file);
+          // Remove leading slash and construct full path to parent directory
+          const relativePath = doc.doc_file.startsWith('/') ? doc.doc_file.substring(1) : doc.doc_file;
+          const filePath = path.join(process.cwd(), '..', relativePath);
 
           if (!fs.existsSync(filePath)) {
-            throw new Error(`File not found: ${doc.doc_file}`);
+            throw new Error(`File not found: ${filePath}`);
           }
 
           // Create backup of original
@@ -442,7 +444,8 @@ export const encryptDocumentFiles = async (caseId, userId) => {
             updatedReferences = [];
             for (const refPath of doc.doc_reference) {
               const refString = typeof refPath === "string" ? refPath : refPath;
-              const refFilePath = path.join(process.cwd(), refString);
+              const relativeRefPath = refString.startsWith('/') ? refString.substring(1) : refString;
+              const refFilePath = path.join(process.cwd(), '..', relativeRefPath);
 
               if (fs.existsSync(refFilePath)) {
                 try {
@@ -510,7 +513,8 @@ export const encryptDocumentFiles = async (caseId, userId) => {
 
         // Attempt rollback for this document
         try {
-          const filePath = path.join(process.cwd(), doc.doc_file);
+          const relativePath = doc.doc_file.startsWith('/') ? doc.doc_file.substring(1) : doc.doc_file;
+          const filePath = path.join(process.cwd(), '..', relativePath);
           const backupPath = filePath + ".original";
           if (fs.existsSync(backupPath)) {
             fs.copyFileSync(backupPath, filePath);
@@ -556,7 +560,8 @@ export const decryptDocumentFiles = async (caseId, userId) => {
     for (const doc of documents) {
       try {
         if (doc.doc_file && doc.encryption_metadata) {
-          const filePath = path.join(process.cwd(), doc.doc_file);
+          const relativePath = doc.doc_file.startsWith('/') ? doc.doc_file.substring(1) : doc.doc_file;
+          const filePath = path.join(process.cwd(), '..', relativePath);
           const metadata =
             typeof doc.encryption_metadata === "string"
               ? JSON.parse(doc.encryption_metadata)
@@ -593,7 +598,8 @@ export const decryptDocumentFiles = async (caseId, userId) => {
             updatedReferences = [];
             for (const ref of doc.doc_reference) {
               if (typeof ref === "object" && ref.isEncrypted && ref.metadata) {
-                const refFilePath = path.join(process.cwd(), ref.path);
+                const relativeRefPath = ref.path.startsWith('/') ? ref.path.substring(1) : ref.path;
+                const refFilePath = path.join(process.cwd(), '..', relativeRefPath);
 
                 try {
                   const refTempDec = refFilePath + ".tmp.dec";

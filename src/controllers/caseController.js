@@ -183,9 +183,10 @@ export const updateCase = async (req, res) => {
     if (isArchiving) {
       try {
         console.log(`Encrypting documents for case ${caseId}...`);
+        const userId = caseData.last_updated_by || caseData.user_id;
         const encryptResults = await documentServices.encryptDocumentFiles(
           caseId,
-          req.user.user_id
+          userId
         );
 
         if (encryptResults.failed.length > 0) {
@@ -224,9 +225,10 @@ export const updateCase = async (req, res) => {
     if (isUnarchiving) {
       try {
         console.log(`Decrypting documents for case ${caseId}...`);
+        const userId = caseData.last_updated_by || caseData.user_id;
         const decryptResults = await documentServices.decryptDocumentFiles(
           caseId,
-          req.user.user_id
+          userId
         );
 
         if (decryptResults.failed.length > 0) {
