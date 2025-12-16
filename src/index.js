@@ -28,7 +28,7 @@ app.use(
       "http://localhost:4000",
       "http://localhost:4173" 
     ],
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true,
   })
 );

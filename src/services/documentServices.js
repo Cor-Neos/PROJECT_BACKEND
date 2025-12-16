@@ -5,24 +5,26 @@ import { query } from "../db.js";
 import bcrypt from "bcrypt";
 const saltRounds = 10;
 
-// Get all documents
+// Get all documents (excluding deleted ones)
 export const getDocuments = async () => {
   const { rows } = await query(
     `SELECT d.* FROM document_tbl d 
      JOIN case_tbl c ON d.case_id = c.case_id
      WHERE c.case_status != 'Archived (Completed)' AND c.case_status != 'Archived (Dismissed)' 
      AND c.case_status != 'Dismissed' AND c.case_status != 'Completed'
+     AND (d.is_deleted IS NULL OR d.is_deleted = false)
      ORDER BY doc_id DESC`
   );
   return rows;
 };
 
-// Get all documents of lawyer's cases
+// Get all documents of lawyer's cases (excluding deleted ones)
 export const getDocumentsByLawyer = async (lawyerId) => {
   const { rows } = await query(
     `SELECT d.* FROM document_tbl d
      JOIN case_tbl c ON d.case_id = c.case_id
       WHERE c.user_id = $1
+      AND (d.is_deleted IS NULL OR d.is_deleted = false)
       ORDER BY d.doc_id DESC`,
     [lawyerId]
   );
@@ -37,19 +39,19 @@ export const getDocumentById = async (docId) => {
   return rows[0];
 };
 
-// Get documents by Case ID
+// Get documents by Case ID (excluding deleted ones)
 export const getDocumentsByCaseId = async (caseId) => {
   const { rows } = await query(
-    "SELECT * FROM document_tbl WHERE case_id = $1 ORDER BY doc_id ASC",
+    "SELECT * FROM document_tbl WHERE case_id = $1 AND (is_deleted IS NULL OR is_deleted = false) ORDER BY doc_id ASC",
     [caseId]
   );
   return rows;
 };
 
-// Get documents submitted by a specific user
+// Get documents submitted by a specific user (excluding deleted ones)
 export const getDocumentsBySubmitter = async (userId) => {
   const { rows } = await query(
-    "SELECT * FROM document_tbl WHERE doc_submitted_by = $1 ORDER BY doc_id DESC",
+    "SELECT * FROM document_tbl WHERE doc_submitted_by = $1 AND (is_deleted IS NULL OR is_deleted = false) ORDER BY doc_id DESC",
     [userId]
   );
   return rows;
@@ -68,6 +70,7 @@ export const getTaskDocumentsByUser = async (userId) => {
         OR c.user_id = $1
       )
       AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)
+      AND (d.is_deleted IS NULL OR d.is_deleted = false)
     ORDER BY d.doc_id DESC;
   `;
 
@@ -219,8 +222,36 @@ export const updateDocument = async (docId, docData) => {
   return rows[0];
 };
 
-// Delete a document
-export const deleteDocument = async (docId) => {
+// Soft delete a document (move to trash)
+export const deleteDocument = async (docId, userId) => {
+  const { rows } = await query(
+    `UPDATE document_tbl 
+     SET is_deleted = true, 
+         doc_deleted_date = NOW(), 
+         doc_deleted_by = $2
+     WHERE doc_id = $1 
+     RETURNING *`,
+    [docId, userId]
+  );
+  return rows[0];
+};
+
+// Restore a deleted document from trash
+export const restoreDocument = async (docId) => {
+  const { rows } = await query(
+    `UPDATE document_tbl 
+     SET is_deleted = false, 
+         doc_deleted_date = NULL, 
+         doc_deleted_by = NULL
+     WHERE doc_id = $1 
+     RETURNING *`,
+    [docId]
+  );
+  return rows[0];
+};
+
+// Permanently delete a document from database
+export const permanentDeleteDocument = async (docId) => {
   const { rows } = await query(
     "DELETE FROM document_tbl WHERE doc_id = $1 RETURNING *",
     [docId]
@@ -228,12 +259,29 @@ export const deleteDocument = async (docId) => {
   return rows[0];
 };
 
-// Simple search by name / tag / status
+// Get all deleted documents for trash view
+export const getDeletedDocuments = async () => {
+  const { rows } = await query(
+    `SELECT d.*, 
+            ct.ct_name as case_name,
+            u.user_fname || ' ' || COALESCE(u.user_mname, '') || ' ' || u.user_lname as deleted_by_name
+     FROM document_tbl d
+     LEFT JOIN case_tbl c ON d.case_id = c.case_id
+     LEFT JOIN cc_type_tbl ct ON c.ct_id = ct.ct_id
+     LEFT JOIN user_tbl u ON d.doc_deleted_by = u.user_id
+     WHERE d.is_deleted = true
+     ORDER BY d.doc_deleted_date DESC`
+  );
+  return rows;
+};
+
+// Simple search by name / tag / status (excluding deleted documents)
 export const searchDocuments = async (term) => {
   const like = `%${term}%`;
   const { rows } = await query(
     `SELECT * FROM document_tbl
-     WHERE doc_name ILIKE $1 OR COALESCE(doc_tag,'') ILIKE $1 OR COALESCE(doc_status,'') ILIKE $1
+     WHERE (doc_name ILIKE $1 OR COALESCE(doc_tag,'') ILIKE $1 OR COALESCE(doc_status,'') ILIKE $1)
+     AND (is_deleted IS NULL OR is_deleted = false)
      ORDER BY doc_id DESC`,
     [like]
   );
@@ -243,7 +291,7 @@ export const searchDocuments = async (term) => {
 // count for approval documents with status "done" for dashboard
 export const countForApprovalDocuments = async () => {
   const { rows } = await query(
-    `SELECT COUNT(*) FROM document_tbl WHERE doc_status = 'done'`
+    `SELECT COUNT(*) FROM document_tbl WHERE doc_status = 'done' AND (is_deleted IS NULL OR is_deleted = false)`
   );
   return rows[0].count;
 };
@@ -253,7 +301,8 @@ export const countProcessingDocuments = async () => {
   const { rows } = await query(
     `SELECT COUNT(*) FROM document_tbl d
       JOIN case_tbl c ON d.case_id = c.case_id
-      WHERE c.case_status = 'Processing'`
+      WHERE c.case_status = 'Processing'
+      AND (d.is_deleted IS NULL OR d.is_deleted = false)`
   );
   return rows[0].count;
 };
@@ -263,7 +312,8 @@ export const countProcessingDocumentsByLawyer = async (lawyerId) => {
   const { rows } = await query(
     `SELECT COUNT(*) FROM document_tbl d
       JOIN case_tbl c ON d.case_id = c.case_id
-      WHERE c.case_status = 'Processing' AND c.user_id = $1`,
+      WHERE c.case_status = 'Processing' AND c.user_id = $1
+      AND (d.is_deleted IS NULL OR d.is_deleted = false)`,
     [lawyerId]
   );
   return rows[0].count;
@@ -275,7 +325,8 @@ export const countPendingTaskDocuments = async () => {
     `SELECT COUNT(*) FROM document_tbl d 
      JOIN case_tbl c ON d.case_id = c.case_id
      WHERE doc_type = 'Task' AND LOWER(doc_status) NOT IN ('approved', 'done', 'completed')
-     AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)`
+     AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)
+     AND (d.is_deleted IS NULL OR d.is_deleted = false)`
   );
   return rows[0].count;
 };
@@ -295,6 +346,7 @@ export const countUserPendingTaskDocuments = async (userId) => {
       )
       AND (d.doc_status IS NULL OR LOWER(d.doc_status) NOT IN ('approved', 'completed', 'done'))
       AND (c.case_status NOT IN ('Archived (Completed)', 'Archived (Dismissed)', 'Completed', 'Dismissed') OR c.case_status IS NULL)
+      AND (d.is_deleted IS NULL OR d.is_deleted = false)
   `;
 
   const { rows } = await query(sql, [userId]);

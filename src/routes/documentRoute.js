@@ -90,6 +90,11 @@ router.put(
 
 router.delete("/documents/:id", verifyUser, requireAdmin, documentController.deleteDocument);
 
+// Trash system routes
+router.patch("/documents/:id/restore", verifyUser, documentController.restoreDocument);
+router.delete("/documents/:id/permanent", verifyUser, requireAdmin, documentController.permanentDeleteDocument);
+router.get("/documents-deleted", verifyUser, documentController.getDeletedDocuments);
+
 router.get(
   "/documents/search/:query",
   verifyUser,

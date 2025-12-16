@@ -174,17 +174,62 @@ export const updateDocument = async (req, res) => {
   }
 };
 
-// Deleting a Document
+// Soft Delete a Document (move to trash)
 export const deleteDocument = async (req, res) => {
   const { id } = req.params;
+  const userId = req.user?.user_id || req.body.user_id;
+  
   try {
-    const deleted = await documentService.deleteDocument(id);
+    const deleted = await documentService.deleteDocument(id, userId);
     if (!deleted) {
       return res.status(404).json({ message: "Document not found" });
     }
-    res.status(200).json({ message: "Document deleted successfully" });
+    res.status(200).json({ message: "Document moved to trash", document: deleted });
   } catch (err) {
     console.error("Error deleting document:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// Restore a Document from trash
+export const restoreDocument = async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const restored = await documentService.restoreDocument(id);
+    if (!restored) {
+      return res.status(404).json({ message: "Document not found" });
+    }
+    res.status(200).json({ message: "Document restored successfully", document: restored });
+  } catch (err) {
+    console.error("Error restoring document:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// Permanently Delete a Document
+export const permanentDeleteDocument = async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const deleted = await documentService.permanentDeleteDocument(id);
+    if (!deleted) {
+      return res.status(404).json({ message: "Document not found" });
+    }
+    res.status(200).json({ message: "Document permanently deleted" });
+  } catch (err) {
+    console.error("Error permanently deleting document:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// Get all deleted documents (for trash view)
+export const getDeletedDocuments = async (req, res) => {
+  try {
+    const documents = await documentService.getDeletedDocuments();
+    res.status(200).json(documents);
+  } catch (err) {
+    console.error("Error fetching deleted documents:", err);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
