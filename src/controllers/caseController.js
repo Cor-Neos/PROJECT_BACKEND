@@ -1,4 +1,5 @@
 import * as caseServices from "../services/caseServices.js";
+import * as documentServices from "../services/documentServices.js";
 import {
   sendCaseCreationNotification,
   sendCaseUpdateNotification,
@@ -155,6 +156,112 @@ export const updateCase = async (req, res) => {
     const caseId = req.params.case_id;
     const caseData = req.body;
 
+    // Get current case data to check status change
+    const currentCase = await caseServices.getCaseById(caseId);
+    if (!currentCase) {
+      return res.status(404).json({ error: "Case not found" });
+    }
+
+    const oldStatus = currentCase.case_status;
+    const newStatus = caseData.case_status;
+
+    // Check if archiving (status changing TO archived)
+    const isArchiving =
+      (newStatus === "Archived (Completed)" ||
+        newStatus === "Archived (Dismissed)") &&
+      oldStatus !== "Archived (Completed)" &&
+      oldStatus !== "Archived (Dismissed)";
+
+    // Check if unarchiving (status changing FROM archived)
+    const isUnarchiving =
+      (oldStatus === "Archived (Completed)" ||
+        oldStatus === "Archived (Dismissed)") &&
+      newStatus !== "Archived (Completed)" &&
+      newStatus !== "Archived (Dismissed)";
+
+    // Handle encryption on archive
+    if (isArchiving) {
+      try {
+        console.log(`Encrypting documents for case ${caseId}...`);
+        const encryptResults = await documentServices.encryptDocumentFiles(
+          caseId,
+          req.user.user_id
+        );
+
+        if (encryptResults.failed.length > 0) {
+          console.warn(
+            `Some documents failed to encrypt:`,
+            encryptResults.failed
+          );
+        }
+
+        // Update case status after successful encryption
+        const updatedCase = await caseServices.updateCase(caseId, caseData);
+
+        console.log(
+          `Case ${caseId} archived. Encrypted ${encryptResults.success.length}/${encryptResults.totalCount} documents.`
+        );
+
+        return res.status(200).json({
+          ...updatedCase,
+          encryption: {
+            total: encryptResults.totalCount,
+            success: encryptResults.success.length,
+            failed: encryptResults.failed.length,
+            failedDetails: encryptResults.failed,
+          },
+        });
+      } catch (encryptError) {
+        console.error("Encryption failed:", encryptError);
+        return res.status(500).json({
+          error: "Failed to encrypt documents. Case not archived.",
+          details: encryptError.message,
+        });
+      }
+    }
+
+    // Handle decryption on unarchive
+    if (isUnarchiving) {
+      try {
+        console.log(`Decrypting documents for case ${caseId}...`);
+        const decryptResults = await documentServices.decryptDocumentFiles(
+          caseId,
+          req.user.user_id
+        );
+
+        if (decryptResults.failed.length > 0) {
+          console.warn(
+            `Some documents failed to decrypt:`,
+            decryptResults.failed
+          );
+        }
+
+        // Update case status after successful decryption
+        const updatedCase = await caseServices.updateCase(caseId, caseData);
+
+        console.log(
+          `Case ${caseId} unarchived. Decrypted ${decryptResults.success.length}/${decryptResults.totalCount} documents.`
+        );
+
+        return res.status(200).json({
+          ...updatedCase,
+          decryption: {
+            total: decryptResults.totalCount,
+            success: decryptResults.success.length,
+            failed: decryptResults.failed.length,
+            failedDetails: decryptResults.failed,
+          },
+        });
+      } catch (decryptError) {
+        console.error("Decryption failed:", decryptError);
+        return res.status(500).json({
+          error: "Failed to decrypt documents. Case not unarchived.",
+          details: decryptError.message,
+        });
+      }
+    }
+
+    // Normal update (no archiving/unarchiving)
     const updatedCase = await caseServices.updateCase(caseId, caseData);
 
     const user = await caseServices.getUserById(updatedCase.user_id);

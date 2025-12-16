@@ -1,6 +1,12 @@
 // ------------------- SERVICES or QUERIES FOR DOCUMENTS
 
 import { query } from "../db.js";
+import {
+  encryptFile,
+  decryptToStream,
+} from "../utils/encryption.js";
+import fs from "fs";
+import path from "path";
 
 import bcrypt from "bcrypt";
 const saltRounds = 10;
@@ -368,3 +374,294 @@ export const removeReferenceFromDocument = async (docId, referencePath) => {
   const { rows } = await query(sql, [referencePath, docId]);
   return rows[0];
 };
+
+// ------------------- ENCRYPTION FUNCTIONS FOR ARCHIVED CASES -------------------
+
+// Encrypt all documents for a case when archiving
+export const encryptDocumentFiles = async (caseId, userId) => {
+  const results = {
+    success: [],
+    failed: [],
+    totalCount: 0,
+  };
+
+  try {
+    // Get all non-encrypted documents for this case
+    const { rows: documents } = await query(
+      `SELECT * FROM document_tbl 
+       WHERE case_id = $1 
+       AND (is_encrypted IS NULL OR is_encrypted = FALSE)
+       AND (is_deleted IS NULL OR is_deleted = FALSE)
+       AND doc_file IS NOT NULL`,
+      [caseId]
+    );
+
+    results.totalCount = documents.length;
+
+    if (documents.length === 0) {
+      return results; // No documents to encrypt
+    }
+
+    for (const doc of documents) {
+      try {
+        // Encrypt main document file
+        if (doc.doc_file) {
+          const filePath = path.join(process.cwd(), doc.doc_file);
+
+          if (!fs.existsSync(filePath)) {
+            throw new Error(`File not found: ${doc.doc_file}`);
+          }
+
+          // Create backup of original
+          const backupPath = filePath + ".original";
+          fs.copyFileSync(filePath, backupPath);
+
+          // Encrypt in-place (temp file then replace)
+          const tempEncPath = filePath + ".tmp.enc";
+          const metadata = await encryptFile({
+            srcPath: filePath,
+            destPath: tempEncPath,
+          });
+
+          // Replace original with encrypted
+          fs.renameSync(tempEncPath, filePath);
+
+          // Prepare encryption metadata
+          const encryptionMeta = {
+            ...metadata,
+            originalPath: doc.doc_file,
+            encryptedPath: doc.doc_file,
+            encryptedAt: new Date().toISOString(),
+            encryptedBy: userId,
+            backupPath: doc.doc_file + ".original",
+          };
+
+          // Handle reference documents encryption
+          let updatedReferences = doc.doc_reference;
+          if (doc.doc_reference && Array.isArray(doc.doc_reference)) {
+            updatedReferences = [];
+            for (const refPath of doc.doc_reference) {
+              const refString = typeof refPath === "string" ? refPath : refPath;
+              const refFilePath = path.join(process.cwd(), refString);
+
+              if (fs.existsSync(refFilePath)) {
+                try {
+                  // Backup reference file
+                  const refBackup = refFilePath + ".original";
+                  fs.copyFileSync(refFilePath, refBackup);
+
+                  // Encrypt reference file
+                  const refTempEnc = refFilePath + ".tmp.enc";
+                  const refMeta = await encryptFile({
+                    srcPath: refFilePath,
+                    destPath: refTempEnc,
+                  });
+
+                  fs.renameSync(refTempEnc, refFilePath);
+
+                  updatedReferences.push({
+                    path: refString,
+                    isEncrypted: true,
+                    metadata: {
+                      iv: refMeta.iv,
+                      tag: refMeta.tag,
+                      encKey: refMeta.encKey,
+                      wrapIV: refMeta.wrapIV,
+                      wrapTag: refMeta.wrapTag,
+                      checksum: refMeta.checksum,
+                    },
+                  });
+                } catch (refErr) {
+                  console.error(
+                    `Failed to encrypt reference ${refString}:`,
+                    refErr
+                  );
+                  // Keep original path if encryption fails
+                  updatedReferences.push(refString);
+                }
+              } else {
+                // Keep original path if file doesn't exist
+                updatedReferences.push(refString);
+              }
+            }
+          }
+
+          // Update database
+          await query(
+            `UPDATE document_tbl 
+             SET is_encrypted = TRUE,
+                 encryption_metadata = $1,
+                 doc_reference = $2,
+                 doc_last_updated_by = $3
+             WHERE doc_id = $4`,
+            [
+              JSON.stringify(encryptionMeta),
+              updatedReferences ? JSON.stringify(updatedReferences) : null,
+              userId,
+              doc.doc_id,
+            ]
+          );
+
+          results.success.push(doc.doc_id);
+        }
+      } catch (err) {
+        console.error(`Failed to encrypt document ${doc.doc_id}:`, err);
+        results.failed.push({ docId: doc.doc_id, error: err.message });
+
+        // Attempt rollback for this document
+        try {
+          const filePath = path.join(process.cwd(), doc.doc_file);
+          const backupPath = filePath + ".original";
+          if (fs.existsSync(backupPath)) {
+            fs.copyFileSync(backupPath, filePath);
+            fs.unlinkSync(backupPath);
+          }
+        } catch (rollbackErr) {
+          console.error(`Rollback failed for doc ${doc.doc_id}:`, rollbackErr);
+        }
+      }
+    }
+
+    return results;
+  } catch (err) {
+    console.error("Error in encryptDocumentFiles:", err);
+    throw err;
+  }
+};
+
+// Decrypt all documents for a case when unarchiving
+export const decryptDocumentFiles = async (caseId, userId) => {
+  const results = {
+    success: [],
+    failed: [],
+    totalCount: 0,
+  };
+
+  try {
+    // Get all encrypted documents for this case
+    const { rows: documents } = await query(
+      `SELECT * FROM document_tbl 
+       WHERE case_id = $1 
+       AND is_encrypted = TRUE
+       AND (is_deleted IS NULL OR is_deleted = FALSE)`,
+      [caseId]
+    );
+
+    results.totalCount = documents.length;
+
+    if (documents.length === 0) {
+      return results; // No documents to decrypt
+    }
+
+    for (const doc of documents) {
+      try {
+        if (doc.doc_file && doc.encryption_metadata) {
+          const filePath = path.join(process.cwd(), doc.doc_file);
+          const metadata =
+            typeof doc.encryption_metadata === "string"
+              ? JSON.parse(doc.encryption_metadata)
+              : doc.encryption_metadata;
+
+          // Decrypt main file
+          const tempDecPath = filePath + ".tmp.dec";
+          const writable = fs.createWriteStream(tempDecPath);
+
+          await decryptToStream({
+            encryptedPath: filePath,
+            metadata: metadata,
+            writable: writable,
+          });
+
+          // Wait for stream to finish
+          await new Promise((resolve, reject) => {
+            writable.on("finish", resolve);
+            writable.on("error", reject);
+          });
+
+          // Replace encrypted with decrypted
+          fs.renameSync(tempDecPath, filePath);
+
+          // Clean up backup if exists
+          const backupPath = filePath + ".original";
+          if (fs.existsSync(backupPath)) {
+            fs.unlinkSync(backupPath);
+          }
+
+          // Handle reference documents decryption
+          let updatedReferences = doc.doc_reference;
+          if (doc.doc_reference && Array.isArray(doc.doc_reference)) {
+            updatedReferences = [];
+            for (const ref of doc.doc_reference) {
+              if (typeof ref === "object" && ref.isEncrypted && ref.metadata) {
+                const refFilePath = path.join(process.cwd(), ref.path);
+
+                try {
+                  const refTempDec = refFilePath + ".tmp.dec";
+                  const refWritable = fs.createWriteStream(refTempDec);
+
+                  await decryptToStream({
+                    encryptedPath: refFilePath,
+                    metadata: ref.metadata,
+                    writable: refWritable,
+                  });
+
+                  // Wait for stream to finish
+                  await new Promise((resolve, reject) => {
+                    refWritable.on("finish", resolve);
+                    refWritable.on("error", reject);
+                  });
+
+                  fs.renameSync(refTempDec, refFilePath);
+
+                  // Clean up backup
+                  const refBackup = refFilePath + ".original";
+                  if (fs.existsSync(refBackup)) {
+                    fs.unlinkSync(refBackup);
+                  }
+
+                  updatedReferences.push(ref.path);
+                } catch (refErr) {
+                  console.error(
+                    `Failed to decrypt reference ${ref.path}:`,
+                    refErr
+                  );
+                  // Keep original structure if decryption fails
+                  updatedReferences.push(ref);
+                }
+              } else {
+                // Keep non-encrypted references as-is
+                updatedReferences.push(typeof ref === "object" ? ref.path : ref);
+              }
+            }
+          }
+
+          // Update database
+          await query(
+            `UPDATE document_tbl 
+             SET is_encrypted = FALSE,
+                 encryption_metadata = NULL,
+                 doc_reference = $1,
+                 doc_last_updated_by = $2
+             WHERE doc_id = $3`,
+            [
+              updatedReferences ? JSON.stringify(updatedReferences) : null,
+              userId,
+              doc.doc_id,
+            ]
+          );
+
+          results.success.push(doc.doc_id);
+        }
+      } catch (err) {
+        console.error(`Failed to decrypt document ${doc.doc_id}:`, err);
+        results.failed.push({ docId: doc.doc_id, error: err.message });
+      }
+    }
+
+    return results;
+  } catch (err) {
+    console.error("Error in decryptDocumentFiles:", err);
+    throw err;
+  }
+};
+

@@ -1,6 +1,41 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import env from "dotenv";
+
+env.config();
+
+// Validate encryption master key on startup
+if (!process.env.MASTER_KEY) {
+  console.error(
+    "\n❌ ERROR: MASTER_KEY environment variable is not set!"
+  );
+  console.error(
+    "   This is required for document encryption in archived cases."
+  );
+  console.error(
+    "   Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+  );
+  console.error(
+    "   Then add it to your .env file as: MASTER_KEY=<your_64_char_hex_key>\n"
+  );
+  process.exit(1);
+}
+
+if (process.env.MASTER_KEY.length !== 64) {
+  console.error(
+    "\n❌ ERROR: MASTER_KEY must be exactly 64 hexadecimal characters (32 bytes)!"
+  );
+  console.error(
+    `   Current length: ${process.env.MASTER_KEY.length} characters`
+  );
+  console.error(
+    "   Generate a new one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"\n"
+  );
+  process.exit(1);
+}
+
+console.log("✅ Encryption master key validated successfully");
 
 import authRoutes from "./routes/authRoute.js";
 import userRoutes from "./routes/userRoute.js";
